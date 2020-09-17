@@ -1,0 +1,11 @@
+{
+  "domain": "york_bins",
+  "name": "City of York Bins",
+  "documentation": "https://github.com/joeShuff/ha-york-binday",
+  "issue_tracker": "https://github.com/joeShuff/ha-york-binday/issues",
+  "dependencies": [],
+  "after_dependencies": [],
+  "codeowners": ["@joeShuff"],
+  "requirements": ["requests==2.23.0"],
+  "quality_scale": "silver"
+}
