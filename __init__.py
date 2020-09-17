@@ -23,9 +23,13 @@ def setup(hass, config):
         endpoint = "https://doitonline.york.gov.uk/BinsApi/EXOR/getWasteCollectionDatabyUprn?uprn=" + str(property_id)
 
         result = requests.request('GET', endpoint)
-        json_response = json.loads(result.content)
 
-        hass.states.set("york_bins.next_date", )
+        if result.status_code != 200:
+            print("Error making get request")
+        else:
+            json_response = json.loads(result.content)
+
+            hass.states.set("york_bins.next_date", "")
 
     hass.services.register(DOMAIN, "get", handle_get)
 
