@@ -79,11 +79,14 @@ def setup(hass, config):
                 else:
                     collection_available = "not_available"
 
-                hass.states.set(entity_domain, collection_available, {
+                days_until = days_until_collection(bin['NextCollection'])
+
+                hass.states.set(entity_domain, days_until + " Day(s)", {
                     "desc": get_from_json(bin, 'WasteTypeDescription'),
+                    "availability": collection_available,
                     "last_collection": timestamp_from_api_response(bin['LastCollection']),
                     "next_collection": timestamp_from_api_response(bin['NextCollection']),
-                    "collection_in_days": days_until_collection(bin['NextCollection']),
+                    "collection_in_days": days_until,
                     "collection_day": get_from_json(bin, 'CollectionDay'),
                     "collection_day_full": get_from_json(bin, 'CollectionDayFull'),
                     "type": get_from_json(bin, 'BinType'),
@@ -95,7 +98,6 @@ def setup(hass, config):
                     "collection_point_desc": get_from_json(bin, 'CollectionPointDescription'),
                     "number_of_bins": get_from_json(bin, 'NumberOfBins')
                 })
-
 
     hass.services.register(DOMAIN, "get", handle_get)
     # Return boolean to indicate that initialization was successfully.
