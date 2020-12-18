@@ -1,30 +1,56 @@
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
-property_id = "100050589619"
 
-endpoint = "https://doitonline.york.gov.uk/BinsApi/EXOR/getWasteCollectionDatabyUprn?uprn=" + str(property_id)
+def timestamp_from_api_response(resp):
+    try:
+        time = datetime.fromisoformat(resp)
+        return time.strftime('%d/%m/%Y')
+    except Exception as e:
+        return "ERROR (converting time)"
+
+
+def days_until_collection(resp):
+    try:
+        time = datetime.fromisoformat(resp)
+        time.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+
+        diff = time - now
+        return diff.days + 1
+    except Exception as e:
+        return "ERROR (calc days)"
+
+
+def get_from_json(obj, key, default="N/F"):
+    try:
+        return obj[key]
+    except:
+        return default
+
+
+
+property_id = "PROPERTY_ID_HERE"
+endpoint = "https://cyc-myaccount-live.azurewebsites.net/api/bins/GetCollectionDetails/" + str(property_id)
+
+print(days_until_collection("2020-12-15T00:00:00+00:00"))
 
 result = requests.request('GET', endpoint)
-json_response = json.loads(result.content)
 
-next_collection_date = None
+if result.status_code != 200:
+    print("Error making get request" + str(result.status_code))
+else:
+    json_response = json.loads(result.content)['services']
+    bins = len(json_response)
 
-for collection in json_response:
-    if next_collection_date is None:
-        next_collection_date = int(collection['NextCollection'][6:-2])
-        continue
+    if bins > 0:
+        print(str(bins) + " bins found.")
 
-    this_date = int(collection['NextCollection'][6:-2])
+    for bin in json_response:
+        waste_type = str(bin['service'].lower().replace(" ", "_").replace("/", "_"))
 
-    if this_date < next_collection_date:
-        next_collection_date = this_date
+        days_until = days_until_collection(bin['nextCollection'])
+        print("days is " + str(days_until))
 
-
-
-for collection in json_response:
-    epoch = int(collection['NextCollection'][6:-2]) / 1000
-    print(epoch)
-    time = datetime.fromtimestamp(epoch)
-    print(time.strftime('%d/%m/%Y'))
+        print("bin is " + str(bin))

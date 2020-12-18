@@ -1,6 +1,6 @@
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 """
 The "york_bins" custom component.
@@ -18,8 +18,7 @@ DEFAULT_ID = "None"
 
 def timestamp_from_api_response(resp):
     try:
-        epoch = int(resp[6:-2]) / 1000
-        time = datetime.fromtimestamp(epoch)
+        time = datetime.fromisoformat(resp)
         return time.strftime('%d/%m/%Y')
     except:
         return "ERROR (converting time)"
@@ -27,9 +26,9 @@ def timestamp_from_api_response(resp):
 
 def days_until_collection(resp):
     try:
-        epoch = int(resp[6:-2]) / 1000
-        time = datetime.fromtimestamp(epoch)
-        now = datetime.now()
+        time = datetime.fromisoformat(resp)
+        time.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
 
         diff = time - now
         return diff.days + 1
@@ -49,7 +48,8 @@ def setup(hass, config):
         """Handle the service call."""
         property_id = call.data.get(ATTR_ID_NAME, DEFAULT_ID)
 
-        endpoint = "https://doitonline.york.gov.uk/BinsApi/EXOR/getWasteCollectionDatabyUprn?uprn=" + str(property_id)
+        endpoint = "https://cyc-myaccount-live.azurewebsites.net/api/bins/GetCollectionDetails/" + str(property_id)
+        ##endpoint = "https://doitonline.york.gov.uk/BinsApi/EXOR/getWasteCollectionDatabyUprn?uprn=" + str(property_id)
 
         result = requests.request('GET', endpoint)
 
@@ -59,44 +59,27 @@ def setup(hass, config):
             print("Error making get request")
             hass.states.set(DOMAIN + ".last_result", "Web Error (" + str(result.status_code) + ")")
         else:
-            json_response = json.loads(result.content)
+            json_response = json.loads(result.content)['services']
             bins = len(json_response)
 
             if bins > 0:
                 hass.states.set(DOMAIN + ".last_result", str(bins) + " bins found.")
-                hass.states.set(DOMAIN + ".short_address", json_response[0]['ShortAddress'])
             else:
                 hass.states.set(DOMAIN + ".last_result", "No Bins Found")
 
             for bin in json_response:
-                waste_type = str(bin['WasteType'].lower().replace(" ", "_").replace("/", "_"))
+                waste_type = str(bin['service'].lower().replace(" ", "_").replace("/", "_"))
                 entity_domain = DOMAIN + "." + waste_type
 
-                collection_available = get_from_json(bin, 'CollectionAvailable')
+                days_until = days_until_collection(bin['nextCollection'])
 
-                if collection_available == "Y":
-                    collection_available = "available"
-                else:
-                    collection_available = "not_available"
-
-                days_until = days_until_collection(bin['NextCollection'])
-
-                hass.states.set(entity_domain, days_until + " Day(s)", {
-                    "desc": get_from_json(bin, 'WasteTypeDescription'),
-                    "availability": collection_available,
-                    "last_collection": timestamp_from_api_response(bin['LastCollection']),
-                    "next_collection": timestamp_from_api_response(bin['NextCollection']),
+                hass.states.set(entity_domain, str(days_until) + " Day(s)", {
+                    "desc": get_from_json(bin, 'binDescription'),
+                    "last_collection": timestamp_from_api_response(bin['lastCollected']),
+                    "next_collection": timestamp_from_api_response(bin['nextCollection']),
                     "collection_in_days": days_until,
-                    "collection_day": get_from_json(bin, 'CollectionDay'),
-                    "collection_day_full": get_from_json(bin, 'CollectionDayFull'),
-                    "type": get_from_json(bin, 'BinType'),
-                    "type_desc": get_from_json(bin, 'BinTypeDescription'),
-                    "materials": get_from_json(bin, 'MaterialsCollected'),
-                    "provider": get_from_json(bin, 'Provider'),
-                    "image": get_from_json(bin, 'ImageName'),
-                    "collection_point": get_from_json(bin, 'CollectionPoint'),
-                    "collection_point_desc": get_from_json(bin, 'CollectionPointDescription'),
-                    "number_of_bins": get_from_json(bin, 'NumberOfBins')
+                    "frequency": get_from_json(bin, 'frequency'),
+                    "waste_type": get_from_json(bin, 'wasteType')
                 })
 
     hass.services.register(DOMAIN, "get", handle_get)
