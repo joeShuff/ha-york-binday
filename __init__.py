@@ -1,87 +1,35 @@
-import requests
-import json
-from datetime import datetime, timezone
+"""The City of York Bins integration."""
+from __future__ import annotations
 
-"""
-The "york_bins" custom component.
-Configuration:
-To use the yorkbins component you will need to add the following to your
-configuration.yaml file.
-york_bins:
-"""
+import logging
 
-# The domain of your component. Should be equal to the name of your component.
-DOMAIN = "york_bins"
-ATTR_ID_NAME = "property_id"
-DEFAULT_ID = "None"
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant
 
+from .const import CONF_UPRN, DOMAIN
+from .coordinator import YorkBinsCoordinator
 
-def timestamp_from_api_response(resp):
-    try:
-        time = datetime.fromisoformat(resp)
-        return time.strftime('%d/%m/%Y')
-    except:
-        return "ERROR (converting time)"
+_LOGGER = logging.getLogger(__name__)
+
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
-def days_until_collection(resp):
-    try:
-        time = datetime.fromisoformat(resp)
-        time.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up City of York Bins from a config entry."""
+    uprn = entry.data[CONF_UPRN]
+    coordinator = YorkBinsCoordinator(hass, uprn)
 
-        diff = time - now
-        return diff.days + 1
-    except:
-        return "ERROR (calc days)"
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-
-def get_from_json(obj, key, default="N/F"):
-    try:
-        return obj[key]
-    except:
-        return default
-
-
-def setup(hass, config):
-    def handle_get(call):
-        """Handle the service call."""
-        property_id = call.data.get(ATTR_ID_NAME, DEFAULT_ID)
-
-        endpoint = "https://cyc-myaccount-live.azurewebsites.net/api/bins/GetCollectionDetails/" + str(property_id)
-        ##endpoint = "https://doitonline.york.gov.uk/BinsApi/EXOR/getWasteCollectionDatabyUprn?uprn=" + str(property_id)
-
-        result = requests.request('GET', endpoint)
-
-        hass.states.set(DOMAIN + ".last_request", str(datetime.now()))
-
-        if result.status_code != 200:
-            print("Error making get request")
-            hass.states.set(DOMAIN + ".last_result", "Web Error (" + str(result.status_code) + ")")
-        else:
-            json_response = json.loads(result.content)['services']
-            bins = len(json_response)
-
-            if bins > 0:
-                hass.states.set(DOMAIN + ".last_result", str(bins) + " bins found.")
-            else:
-                hass.states.set(DOMAIN + ".last_result", "No Bins Found")
-
-            for bin in json_response:
-                waste_type = str(bin['service'].lower().replace(" ", "_").replace("/", "_"))
-                entity_domain = DOMAIN + "." + waste_type
-
-                days_until = days_until_collection(bin['nextCollection'])
-
-                hass.states.set(entity_domain, str(days_until) + " Day(s)", {
-                    "desc": get_from_json(bin, 'binDescription'),
-                    "last_collection": timestamp_from_api_response(bin['lastCollected']),
-                    "next_collection": timestamp_from_api_response(bin['nextCollection']),
-                    "collection_in_days": days_until,
-                    "frequency": get_from_json(bin, 'frequency'),
-                    "waste_type": get_from_json(bin, 'wasteType')
-                })
-
-    hass.services.register(DOMAIN, "get", handle_get)
-    # Return boolean to indicate that initialization was successfully.
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _LOGGER.info("York Bins integration loaded for UPRN %s", uprn)
     return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        hass.data[DOMAIN].pop(entry.entry_id)
+    return unloaded

@@ -3,9 +3,11 @@
   "name": "City of York Bins",
   "documentation": "https://github.com/joeShuff/ha-york-binday",
   "issue_tracker": "https://github.com/joeShuff/ha-york-binday/issues",
+  "version": "2.0.0",
   "dependencies": [],
   "after_dependencies": [],
   "codeowners": ["@joeShuff"],
-  "requirements": ["requests==2.23.0"],
-  "quality_scale": "silver"
+  "requirements": ["requests"],
+  "config_flow": true,
+  "iot_class": "cloud_polling"
 }

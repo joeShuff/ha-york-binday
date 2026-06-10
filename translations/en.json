@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "City of York Bins",
+        "description": "Enter your UPRN to find your bin collection schedule.\n\nTo find your UPRN: go to the [York Council bin collections page](https://myaccount.york.gov.uk/bin-collections), open your browser's developer tools and go to the **Network** tab. Search for your address and select it from the dropdown — then look for a request to the `waste-api` domain. Your UPRN will be visible in the file/URL column of that request.",
+        "data": {
+          "uprn": "UPRN (Unique Property Reference Number)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the York Bins API. Please check your internet connection and try again.",
+      "invalid_uprn": "No bin collections were found for this UPRN. Please double-check the number.",
+      "unknown": "An unexpected error occurred. Please check the Home Assistant logs."
+    },
+    "abort": {
+      "already_configured": "This UPRN is already configured."
+    }
+  }
+}
