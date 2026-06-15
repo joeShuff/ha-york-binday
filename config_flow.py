@@ -12,46 +12,57 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import API_ENDPOINT, CONF_UPRN, DOMAIN
+from .const import DOMAIN, CONF_UPRN
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_UPRN): str,
-    }
-)
+CONF_POSTCODE = "postcode"
+CONF_ADDRESS = "address"
+
+POSTCODE_SCHEMA = vol.Schema({
+    vol.Required(CONF_POSTCODE): str,
+})
 
 
-def validate_uprn(uprn: str) -> list[dict]:
-    """Validate a UPRN by hitting the York API and return the services list."""
-    url = API_ENDPOINT.format(uprn=uprn)
+def _lookup_postcode(postcode: str) -> list[dict]:
+    """Call the York address API and return a list of address dicts."""
+    cleaned = postcode.strip().replace(" ", "").lower()
+    url = f"https://addresses.york.gov.uk/api/address/lookupbypostcode/{cleaned}"
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
     except requests.exceptions.Timeout as err:
-        raise CannotConnect("Timed out contacting the York Bins API") from err
+        raise CannotConnect("Timed out contacting the York address API") from err
     except requests.exceptions.RequestException as err:
-        raise CannotConnect(f"Error contacting York Bins API: {err}") from err
+        raise CannotConnect(f"Error contacting York address API: {err}") from err
 
-    data = response.json()
-    services = data.get("services", [])
-    if not services:
-        raise InvalidUPRN(f"No bin collections found for UPRN {uprn!r}")
-    return services
+    results = response.json()
+    if not results:
+        raise NoAddressesFound(f"No addresses found for postcode {postcode!r}")
+    return results
 
 
-async def async_validate_input(hass: HomeAssistant, uprn: str) -> dict[str, Any]:
-    """Run validation in the executor so we don't block the event loop."""
-    services = await hass.async_add_executor_job(validate_uprn, uprn)
-    bin_count = len(services)
-    return {"title": f"York Bins ({uprn})", "bin_count": bin_count}
+def _validate_uprn(uprn: str) -> int:
+    """Hit the bin API to confirm the UPRN has collection data; return bin count."""
+    from .coordinator import _fetch_bin_data
+    bins = _fetch_bin_data(uprn)
+    if not bins:
+        raise NoBinsFound(f"No bin collections found for UPRN {uprn!r}")
+    return len(bins)
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for City of York Bins."""
+    """Two-step config flow: postcode → address picker."""
 
     VERSION = 1
+
+    def __init__(self) -> None:
+        self._addresses: list[dict] = []
+        self._postcode: str = ""
+
+    # ------------------------------------------------------------------
+    # Step 1 — postcode entry
+    # ------------------------------------------------------------------
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -59,46 +70,78 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            uprn = user_input[CONF_UPRN].strip()
+            postcode = user_input[CONF_POSTCODE].strip()
+            try:
+                self._addresses = await self.hass.async_add_executor_job(
+                    _lookup_postcode, postcode
+                )
+                self._postcode = postcode
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except NoAddressesFound:
+                errors[CONF_POSTCODE] = "no_addresses"
+            except Exception:
+                _LOGGER.exception("Unexpected error during postcode lookup")
+                errors["base"] = "unknown"
+            else:
+                return await self.async_step_address()
 
-            # Prevent duplicate entries for the same UPRN.
+        return self.async_show_form(
+            step_id="user",
+            data_schema=POSTCODE_SCHEMA,
+            errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2 — address picker
+    # ------------------------------------------------------------------
+
+    async def async_step_address(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        errors: dict[str, str] = {}
+
+        # Build {shortAddress: uprn} map for the selector
+        address_map: dict[str, str] = {
+            a["shortAddress"]: a["uprn"] for a in self._addresses
+        }
+
+        if user_input is not None:
+            selected_address = user_input[CONF_ADDRESS]
+            uprn = address_map[selected_address]
+
             await self.async_set_unique_id(uprn)
             self._abort_if_unique_id_configured()
 
             try:
-                info = await async_validate_input(self.hass, uprn)
+                await self.hass.async_add_executor_job(_validate_uprn, uprn)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except InvalidUPRN:
-                errors[CONF_UPRN] = "invalid_uprn"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected error during config flow")
+            except NoBinsFound:
+                errors["base"] = "no_bins"
+            except Exception:
+                _LOGGER.exception("Unexpected error validating UPRN")
                 errors["base"] = "unknown"
             else:
                 return self.async_create_entry(
-                    title=info["title"],
+                    title=selected_address,
                     data={CONF_UPRN: uprn},
                 )
 
         return self.async_show_form(
-            step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            step_id="address",
+            data_schema=vol.Schema({
+                vol.Required(CONF_ADDRESS): vol.In(list(address_map.keys())),
+            }),
             errors=errors,
-            description_placeholders={
-                "uprn_help": (
-                    "To find your UPRN: go to the York Council bin collections page "
-                    "(https://myaccount.york.gov.uk/bin-collections), open your browser's "
-                    "developer tools and go to the Network tab. Search for your address and "
-                    "select it from the dropdown — then look for a request to the waste-api "
-                    "domain. Your UPRN will be visible in the file/URL column of that request."
-                )
-            },
         )
 
 
 class CannotConnect(HomeAssistantError):
-    """Error raised when we cannot connect to the API."""
+    """Error raised when we cannot connect to an API."""
 
+class NoAddressesFound(HomeAssistantError):
+    """Error raised when the postcode returns no addresses."""
 
-class InvalidUPRN(HomeAssistantError):
-    """Error raised when the UPRN returns no data."""
+class NoBinsFound(HomeAssistantError):
+    """Error raised when the UPRN has no bin collection data."""
