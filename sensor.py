@@ -62,7 +62,7 @@ class YorkBinSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{self._uprn}_{self._slug}"
         self._attr_name = bin_data["waste_type"]
         self._attr_icon = _ICON_MAP.get(self._slug, _DEFAULT_ICON)
-        self._attr_native_unit_of_measurement = "days"
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
 
     # ------------------------------------------------------------------
     # Properties derived from coordinator data

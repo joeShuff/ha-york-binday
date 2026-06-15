@@ -9,6 +9,7 @@ import requests
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import API_ENDPOINT, DEFAULT_SCAN_INTERVAL_HOURS, DOMAIN
 
@@ -16,9 +17,13 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _parse_date(value: str) -> datetime | None:
-    """Parse an ISO-formatted date string, returning None on failure."""
+    """Parse an ISO-formatted date string, localised to the HA configured timezone."""
     try:
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
+        # Make timezone-aware using HA's configured timezone
+        if dt.tzinfo is None:
+            dt = dt_util.as_local(dt)
+        return dt
     except (ValueError, TypeError):
         return None
 
@@ -27,15 +32,6 @@ def _format_date(value: str) -> str | None:
     """Return a human-readable date string (DD/MM/YYYY), or None on failure."""
     dt = _parse_date(value)
     return dt.strftime("%d/%m/%Y") if dt else None
-
-
-def _days_until(value: str) -> int | None:
-    """Return the number of days until a collection date, or None on failure."""
-    dt = _parse_date(value)
-    if dt is None:
-        return None
-    diff = dt.date() - datetime.now().date()
-    return diff.days
 
 
 def _fetch_bin_data(uprn: str) -> list[dict[str, Any]]:
@@ -56,28 +52,24 @@ def _fetch_bin_data(uprn: str) -> list[dict[str, Any]]:
     except ValueError as err:
         raise UpdateFailed(f"Invalid JSON from York Bins API: {err}") from err
 
+    now = dt_util.now()
     bins: list[dict[str, Any]] = []
     for raw in services:
         service_name = raw.get("service", "unknown")
-        next_raw = raw.get("nextCollection")
-        last_raw = raw.get("lastCollected")
+        next_dt = _parse_date(raw.get("nextCollection"))
+        last_dt = _parse_date(raw.get("lastCollected"))
 
-        days = _days_until(next_raw)
-        next_date = _format_date(next_raw)
-
-        # Treat past/invalid dates as unknown
-        if days is not None and days < 0:
-            days = None
-            next_date = None
+        # Discard dates already in the past
+        if next_dt is not None and next_dt < now:
+            next_dt = None
 
         bins.append(
             {
                 "service": service_name,
-                # Slug used as sensor unique_id suffix and entity_id
                 "slug": service_name.lower().replace(" ", "_").replace("/", "_"),
-                "days_until": days,
-                "next_collection": next_date,
-                "last_collection": _format_date(last_raw),
+                "next_collection_dt": next_dt,
+                "next_collection": _format_date(raw.get("nextCollection")),
+                "last_collection": _format_date(raw.get("lastCollected")),
                 "bin_description": raw.get("binDescription"),
                 "frequency": raw.get("frequency"),
                 "waste_type": raw.get("wasteType"),
@@ -88,7 +80,7 @@ def _fetch_bin_data(uprn: str) -> list[dict[str, Any]]:
 
 
 class YorkBinsCoordinator(DataUpdateCoordinator):
-    """Coordinator that polls the York Bins API once a day."""
+    """Coordinator that polls the York Bins API to refresh collection dates."""
 
     def __init__(self, hass: HomeAssistant, uprn: str) -> None:
         self.uprn = uprn
