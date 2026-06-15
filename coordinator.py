@@ -16,13 +16,16 @@ from .const import API_ENDPOINT, DEFAULT_SCAN_INTERVAL_HOURS, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
-def _parse_date(value: str) -> datetime | None:
-    """Parse an ISO-formatted date string, localised to the HA configured timezone."""
+def _parse_date(value: str, hour: int = 9) -> datetime | None:
+    """Parse an ISO date string into a timezone-aware local datetime.
+
+    Time is forced to `hour` (default 9am) since the API only gives dates —
+    midnight would be misleading in the TIMESTAMP sensor display.
+    """
     try:
         dt = datetime.fromisoformat(value)
-        # Make timezone-aware using HA's configured timezone
         if dt.tzinfo is None:
-            dt = dt.replace(hour=9, minute=0, second=0, microsecond=0)
+            dt = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
             dt = dt_util.as_local(dt)
         return dt
     except (ValueError, TypeError):
@@ -30,7 +33,7 @@ def _parse_date(value: str) -> datetime | None:
 
 
 def _format_date(value: str) -> str | None:
-    """Return a human-readable date string (DD/MM/YYYY), or None on failure."""
+    """Return DD/MM/YYYY, or None on failure."""
     dt = _parse_date(value)
     return dt.strftime("%d/%m/%Y") if dt else None
 
@@ -57,10 +60,11 @@ def _fetch_bin_data(uprn: str) -> list[dict[str, Any]]:
     bins: list[dict[str, Any]] = []
     for raw in services:
         service_name = raw.get("service", "unknown")
+
         next_dt = _parse_date(raw.get("nextCollection"))
         last_dt = _parse_date(raw.get("lastCollected"))
 
-        # Discard dates already in the past
+        # Discard next collection dates already in the past
         if next_dt is not None and next_dt < now:
             next_dt = None
 
@@ -69,11 +73,13 @@ def _fetch_bin_data(uprn: str) -> list[dict[str, Any]]:
                 "service": service_name,
                 "slug": service_name.lower().replace(" ", "_").replace("/", "_"),
                 "next_collection_dt": next_dt,
+                "last_collection_dt": last_dt,
                 "next_collection": _format_date(raw.get("nextCollection")),
                 "last_collection": _format_date(raw.get("lastCollected")),
                 "bin_description": raw.get("binDescription"),
                 "frequency": raw.get("frequency"),
                 "waste_type": raw.get("wasteType"),
+                "collected_by": raw.get("collectedBy"),
             }
         )
 
