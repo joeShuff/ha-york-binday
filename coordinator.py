@@ -22,6 +22,7 @@ def _parse_date(value: str) -> datetime | None:
         dt = datetime.fromisoformat(value)
         # Make timezone-aware using HA's configured timezone
         if dt.tzinfo is None:
+            dt = dt.replace(hour=9, minute=0, second=0, microsecond=0)
             dt = dt_util.as_local(dt)
         return dt
     except (ValueError, TypeError):
