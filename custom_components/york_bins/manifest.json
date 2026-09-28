@@ -3,7 +3,7 @@
   "name": "City of York Bins",
   "documentation": "https://github.com/joeShuff/ha-york-binday",
   "issue_tracker": "https://github.com/joeShuff/ha-york-binday/issues",
-  "version": "v1.0",
+  "version": "v2.0",
   "dependencies": [],
   "after_dependencies": [],
   "codeowners": [
